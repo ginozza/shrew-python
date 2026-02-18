@@ -73,7 +73,7 @@ struct PyTensor {
 
 #[pymethods]
 impl PyTensor {
-    //  Creation 
+    //  Creation
 
     /// Create a tensor from a flat list and shape.
     #[staticmethod]
@@ -215,7 +215,7 @@ impl PyTensor {
         })
     }
 
-    //  Properties 
+    //  Properties
 
     #[getter]
     fn shape(&self) -> Vec<usize> {
@@ -247,7 +247,7 @@ impl PyTensor {
         self.inner.is_contiguous()
     }
 
-    //  Conversions 
+    //  Conversions
 
     fn to_list(&self) -> PyResult<Vec<f64>> {
         self.inner.to_f64_vec().map_err(to_py_err)
@@ -302,7 +302,7 @@ impl PyTensor {
         })
     }
 
-    //  Arithmetic 
+    //  Arithmetic
 
     fn __add__(&self, other: &PyTensor) -> PyResult<Self> {
         Ok(PyTensor {
@@ -335,7 +335,7 @@ impl PyTensor {
         })
     }
 
-    //  Comparisons 
+    //  Comparisons
 
     fn eq(&self, other: &PyTensor) -> PyResult<Self> {
         Ok(PyTensor {
@@ -368,7 +368,7 @@ impl PyTensor {
         })
     }
 
-    //  Unary ops 
+    //  Unary ops
 
     fn exp(&self) -> PyResult<Self> {
         Ok(PyTensor {
@@ -461,7 +461,7 @@ impl PyTensor {
         })
     }
 
-    //  Special element-wise 
+    //  Special element-wise
 
     fn powf(&self, exponent: f64) -> PyResult<Self> {
         Ok(PyTensor {
@@ -490,7 +490,7 @@ impl PyTensor {
         })
     }
 
-    //  Composite ops 
+    //  Composite ops
 
     fn softmax(&self, dim: usize) -> PyResult<Self> {
         Ok(PyTensor {
@@ -503,7 +503,7 @@ impl PyTensor {
         })
     }
 
-    //  Reductions 
+    //  Reductions
 
     fn sum_all(&self) -> PyResult<Self> {
         Ok(PyTensor {
@@ -582,7 +582,7 @@ impl PyTensor {
         })
     }
 
-    //  Shape ops 
+    //  Shape ops
 
     fn reshape(&self, shape: Vec<usize>) -> PyResult<Self> {
         Ok(PyTensor {
@@ -656,7 +656,7 @@ impl PyTensor {
         })
     }
 
-    //  Static shape ops 
+    //  Static shape ops
 
     #[staticmethod]
     fn cat(tensors: Vec<PyRef<PyTensor>>, dim: usize) -> PyResult<Self> {
@@ -674,7 +674,7 @@ impl PyTensor {
         })
     }
 
-    //  Indexing / selection 
+    //  Indexing / selection
 
     fn index_select(&self, dim: usize, indices: &PyTensor) -> PyResult<Self> {
         Ok(PyTensor {
@@ -696,7 +696,7 @@ impl PyTensor {
         })
     }
 
-    //  Sorting 
+    //  Sorting
 
     #[pyo3(signature = (dim, descending=false))]
     fn sort(&self, dim: usize, descending: bool) -> PyResult<(Self, Self)> {
@@ -714,7 +714,7 @@ impl PyTensor {
         Ok((PyTensor { inner: vals }, idxs))
     }
 
-    //  Conv/Pool convenience 
+    //  Conv/Pool convenience
 
     #[pyo3(signature = (weight, bias=None, stride=[1,1], padding=[0,0]))]
     fn conv2d(
@@ -778,7 +778,7 @@ impl PyTensor {
         })
     }
 
-    //  Matmul 
+    //  Matmul
 
     fn matmul(&self, other: &PyTensor) -> PyResult<Self> {
         Ok(PyTensor {
@@ -786,7 +786,7 @@ impl PyTensor {
         })
     }
 
-    //  Autograd 
+    //  Autograd
 
     fn backward(&self) -> PyResult<PyGradStore> {
         Ok(PyGradStore {
@@ -794,7 +794,7 @@ impl PyTensor {
         })
     }
 
-    //  Display 
+    //  Display
 
     fn __repr__(&self) -> String {
         let dt = dtype_to_str(self.inner.dtype());
@@ -972,7 +972,7 @@ impl PyExecutor {
 
 // NN Layers
 
-//  Linear 
+//  Linear
 
 #[pyclass(name = "Linear")]
 struct PyLinear {
@@ -1011,7 +1011,7 @@ impl PyLinear {
     }
 }
 
-//  Conv2d 
+//  Conv2d
 
 #[pyclass(name = "Conv2d")]
 struct PyConv2d {
@@ -1065,7 +1065,7 @@ impl PyConv2d {
     }
 }
 
-//  Conv1d 
+//  Conv1d
 
 #[pyclass(name = "Conv1d")]
 struct PyConv1d {
@@ -1119,7 +1119,7 @@ impl PyConv1d {
     }
 }
 
-//  BatchNorm2d 
+//  BatchNorm2d
 
 #[pyclass(name = "BatchNorm2d", unsendable)]
 struct PyBatchNorm2d {
@@ -1156,7 +1156,7 @@ impl PyBatchNorm2d {
     }
 }
 
-//  LayerNorm 
+//  LayerNorm
 
 #[pyclass(name = "LayerNorm")]
 struct PyLayerNorm {
@@ -1193,7 +1193,7 @@ impl PyLayerNorm {
     }
 }
 
-//  GroupNorm 
+//  GroupNorm
 
 #[pyclass(name = "GroupNorm")]
 struct PyGroupNorm {
@@ -1230,7 +1230,7 @@ impl PyGroupNorm {
     }
 }
 
-//  RMSNorm 
+//  RMSNorm
 
 #[pyclass(name = "RMSNorm")]
 struct PyRMSNorm {
@@ -1267,7 +1267,7 @@ impl PyRMSNorm {
     }
 }
 
-//  Embedding 
+//  Embedding
 
 #[pyclass(name = "Embedding")]
 struct PyEmbedding {
@@ -1304,7 +1304,7 @@ impl PyEmbedding {
     }
 }
 
-//  Dropout 
+//  Dropout
 
 #[pyclass(name = "Dropout", unsendable)]
 struct PyDropout {
@@ -1334,7 +1334,7 @@ impl PyDropout {
     }
 }
 
-//  Flatten 
+//  Flatten
 
 #[pyclass(name = "FlattenLayer")]
 struct PyFlatten {
@@ -1365,7 +1365,7 @@ impl PyFlatten {
     }
 }
 
-//  MaxPool2d 
+//  MaxPool2d
 
 #[pyclass(name = "MaxPool2d")]
 struct PyMaxPool2d {
@@ -1396,7 +1396,7 @@ impl PyMaxPool2d {
     }
 }
 
-//  AvgPool2d 
+//  AvgPool2d
 
 #[pyclass(name = "AvgPool2d")]
 struct PyAvgPool2d {
@@ -1427,7 +1427,7 @@ impl PyAvgPool2d {
     }
 }
 
-//  AdaptiveAvgPool2d 
+//  AdaptiveAvgPool2d
 
 #[pyclass(name = "AdaptiveAvgPool2d")]
 struct PyAdaptiveAvgPool2d {
@@ -1457,7 +1457,7 @@ impl PyAdaptiveAvgPool2d {
     }
 }
 
-//  MultiHeadAttention 
+//  MultiHeadAttention
 
 #[pyclass(name = "MultiHeadAttention")]
 struct PyMultiHeadAttention {
@@ -1495,7 +1495,7 @@ impl PyMultiHeadAttention {
     }
 }
 
-//  TransformerBlock 
+//  TransformerBlock
 
 #[pyclass(name = "TransformerBlock")]
 struct PyTransformerBlock {
@@ -1571,7 +1571,7 @@ impl PyRNNCell {
     }
 }
 
-//  RNN 
+//  RNN
 
 #[pyclass(name = "RNN")]
 struct PyRNN {
@@ -1607,7 +1607,7 @@ impl PyRNN {
     }
 }
 
-//  LSTMCell 
+//  LSTMCell
 
 #[pyclass(name = "LSTMCell")]
 struct PyLSTMCell {
@@ -1642,7 +1642,7 @@ impl PyLSTMCell {
     }
 }
 
-//  LSTM 
+//  LSTM
 
 #[pyclass(name = "LSTM")]
 struct PyLSTM {
@@ -1688,7 +1688,7 @@ impl PyLSTM {
     }
 }
 
-//  GRUCell 
+//  GRUCell
 
 #[pyclass(name = "GRUCell")]
 struct PyGRUCell {
@@ -1720,7 +1720,7 @@ impl PyGRUCell {
     }
 }
 
-//  GRU 
+//  GRU
 
 #[pyclass(name = "GRU")]
 struct PyGRU {
@@ -1850,7 +1850,7 @@ impl PyELU {
 
 // Optimizers
 
-//  SGD 
+//  SGD
 
 #[pyclass(name = "SGD")]
 struct PySGD {
@@ -1880,7 +1880,7 @@ impl PySGD {
     }
 }
 
-//  Adam 
+//  Adam
 
 #[pyclass(name = "Adam")]
 struct PyAdam {
@@ -1915,7 +1915,7 @@ impl PyAdam {
     }
 }
 
-//  AdamW 
+//  AdamW
 
 #[pyclass(name = "AdamW")]
 struct PyAdamW {
@@ -1947,7 +1947,7 @@ impl PyAdamW {
     }
 }
 
-//  RMSProp 
+//  RMSProp
 
 #[pyclass(name = "RMSProp")]
 struct PyRMSProp {
@@ -1982,7 +1982,7 @@ impl PyRMSProp {
     }
 }
 
-//  RAdam 
+//  RAdam
 
 #[pyclass(name = "RAdam")]
 struct PyRAdam {
@@ -2235,7 +2235,7 @@ fn grad_norm(grads: &PyGradStore, params: Vec<PyRef<PyTensor>>) -> PyResult<f64>
 
 // Data Loading
 
-//  MnistDataset 
+//  MnistDataset
 
 #[pyclass(name = "MnistDataset")]
 struct PyMnistDataset {
@@ -2288,7 +2288,7 @@ impl PyMnistDataset {
     // If needed, load a fresh dataset and take.
 }
 
-//  CsvDataset 
+//  CsvDataset
 
 #[pyclass(name = "CsvDataset")]
 struct PyCsvDataset {
