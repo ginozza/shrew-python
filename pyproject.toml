@@ -7,7 +7,33 @@ name = "shrew_python"
 version = "0.1.0"
 description = "Python bindings for the Shrew deep learning library"
 requires-python = ">=3.9"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+authors = [
+    { name = "ginozza", email = "jsimancas@unimagdalena.edu.co" },
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+keywords = ["deep-learning", "machine-learning", "rust", "neural-network", "tensor"]
+
+[project.urls]
+Homepage = "https://github.com/ginozza/shrew"
+Repository = "https://github.com/ginozza/shrew"
+Documentation = "https://github.com/ginozza/shrew#readme"
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
 manifest-path = "Cargo.toml"
+
