@@ -3,7 +3,7 @@
 Python bindings for [Shrew](https://github.com/ginozza/shrew), a modular deep learning framework written in Rust.
 
 <p align="center">
-  <a href="https://pypi.org/project/shrew-python/"><img src="https://img.shields.io/pypi/v/shrew-python.svg" alt="PyPI"></a>
+  <a href="https://pypi.org/project/shrew-python/"><img src="https://img.shields.io/pypi/v/shrew-python.svg?color=3775A9&logo=python&logoColor=white" alt="PyPI"></a>
 </p>
 
 ## Features
