@@ -1052,6 +1052,12 @@ impl PyExecutor {
         Ok(map)
     }
 
+    /// Automatically run inference using the model's @inference configuration.
+    fn infer(&self) -> PyResult<Option<PyTensor>> {
+        let res = self.inner.infer_auto().map_err(to_py_err)?;
+        Ok(res.output().map(|t| PyTensor { inner: DeviceTensor::Cpu(t.clone()) }))
+    }
+
     /// Get the list of input names for a graph.
     fn input_names(&self, graph_name: &str) -> PyResult<Vec<String>> {
         let graph =
@@ -2823,11 +2829,23 @@ fn py_train(path: &str, dtype: &str) -> PyResult<std::collections::HashMap<Strin
     Ok(map)
 }
 
+/// Run inference on a .sw model file directly using its embedded @inference configuration.
+#[pyfunction(name = "run")]
+#[pyo3(signature = (path, dtype="f64"))]
+fn py_run(path: &str, dtype: &str) -> PyResult<Option<PyTensor>> {
+    let dt = parse_dtype(dtype)?;
+    let config = shrew::exec::RuntimeConfig::default().with_dtype(dt);
+    let exec_res = shrew::exec::run_file::<B>(path, CpuDevice, config)
+        .map_err(|e| PyRuntimeError::new_err(format!("{e}")))?;
+    Ok(exec_res.output().map(|t| PyTensor { inner: DeviceTensor::Cpu(t.clone()) }))
+}
+
 // Module Registration
 
 #[pymodule]
 fn shrew_python(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(py_train, m)?)?;
+    m.add_function(wrap_pyfunction!(py_run, m)?)?;
 
     // Core
     m.add_class::<PyTensor>()?;
