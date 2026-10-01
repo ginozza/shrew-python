@@ -801,14 +801,26 @@ impl PyTensor {
         let shape = self.inner.dims();
         if self.inner.elem_count() <= 10 {
             if let Ok(data) = self.inner.to_f64_vec() {
-                return format!("Tensor({:?}, shape={:?}, dtype={})", data, shape, dt);
+                return format!("Tensor({:?}, shape={:?}, dtype={}, dev=Cpu)", data, shape, dt);
             }
         }
-        format!("Tensor(shape={:?}, dtype={})", shape, dt)
+        format!("Tensor(shape={:?}, dtype={}, dev=Cpu)", shape, dt)
     }
 
     fn __str__(&self) -> String {
         self.__repr__()
+    }
+
+    /// Return the device string of this tensor ('cpu').
+    #[getter]
+    fn device(&self) -> &'static str {
+        "cpu"
+    }
+
+    /// Return whether this tensor is hosted on a CUDA GPU.
+    #[getter]
+    fn is_cuda(&self) -> bool {
+        false
     }
 }
 
@@ -2517,6 +2529,38 @@ fn parse_average(s: &str) -> PyResult<shrew_nn::metrics::Average> {
     }
 }
 
+// GPU Information
+
+/// Returns True if CUDA GPU acceleration is available on this system.
+#[pyfunction]
+fn is_cuda_available() -> bool {
+    #[cfg(feature = "cuda")]
+    {
+        shrew_cuda::CudaDevice::new(0).is_ok()
+    }
+    #[cfg(not(feature = "cuda"))]
+    {
+        false
+    }
+}
+
+/// Returns the number of CUDA devices available.
+#[pyfunction]
+fn cuda_device_count() -> usize {
+    #[cfg(feature = "cuda")]
+    {
+        let mut count = 0;
+        while shrew_cuda::CudaDevice::new(count).is_ok() {
+            count += 1;
+        }
+        count
+    }
+    #[cfg(not(feature = "cuda"))]
+    {
+        0
+    }
+}
+
 // Module Registration
 
 #[pymodule]
@@ -2611,6 +2655,10 @@ fn shrew_python(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(py_perplexity, m)?)?;
     m.add_function(wrap_pyfunction!(py_tensor_accuracy, m)?)?;
     m.add_function(wrap_pyfunction!(py_argmax_classes, m)?)?;
+
+    // GPU utilities
+    m.add_function(wrap_pyfunction!(is_cuda_available, m)?)?;
+    m.add_function(wrap_pyfunction!(cuda_device_count, m)?)?;
 
     Ok(())
 }

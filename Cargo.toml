@@ -14,6 +14,10 @@ categories.workspace = true
 name = "shrew_python"
 crate-type = ["cdylib"]
 
+[features]
+default = []
+cuda = ["shrew/cuda", "dep:shrew-cuda"]
+
 [dependencies]
 shrew.workspace = true
 shrew-core.workspace = true
@@ -23,3 +27,4 @@ shrew-optim.workspace = true
 shrew-data.workspace = true
 pyo3.workspace = true
 numpy.workspace = true
+shrew-cuda = { workspace = true, optional = true }
