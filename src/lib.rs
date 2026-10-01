@@ -31,6 +31,9 @@ use shrew_cpu::{CpuBackend, CpuDevice};
 type B = CpuBackend;
 type ShrewTensor = shrew_core::tensor::Tensor<B>;
 
+pub mod device_tensor;
+pub use device_tensor::DeviceTensor;
+
 // Helpers
 
 fn to_py_err(e: shrew_core::Error) -> PyErr {
@@ -64,11 +67,30 @@ fn dtype_to_str(dt: DType) -> &'static str {
 
 // PyTensor — Full Python wrapper around Tensor<CpuBackend>
 
-/// A multi-dimensional tensor, backed by the Shrew CPU engine.
+/// A multi-dimensional tensor, backed by Shrew's CPU or CUDA GPU engine.
 #[pyclass(name = "Tensor")]
 #[derive(Clone)]
 struct PyTensor {
-    inner: ShrewTensor,
+    inner: DeviceTensor,
+}
+
+impl From<ShrewTensor> for PyTensor {
+    fn from(t: ShrewTensor) -> Self {
+        PyTensor { inner: DeviceTensor::Cpu(t) }
+    }
+}
+
+impl From<DeviceTensor> for PyTensor {
+    fn from(inner: DeviceTensor) -> Self {
+        PyTensor { inner }
+    }
+}
+
+impl PyTensor {
+    #[inline]
+    fn to_cpu_shrew(&self) -> PyResult<ShrewTensor> {
+        self.inner.to_cpu().map_err(to_py_err)
+    }
 }
 
 #[pymethods]
@@ -77,141 +99,165 @@ impl PyTensor {
 
     /// Create a tensor from a flat list and shape.
     #[staticmethod]
-    #[pyo3(signature = (data, shape, dtype="f32"))]
-    fn from_list(data: Vec<f64>, shape: Vec<usize>, dtype: &str) -> PyResult<Self> {
+    #[pyo3(signature = (data, shape, dtype="f32", device="cpu"))]
+    fn from_list(data: Vec<f64>, shape: Vec<usize>, dtype: &str, device: &str) -> PyResult<Self> {
         let dt = parse_dtype(dtype)?;
-        let t = ShrewTensor::from_f64_slice(&data, shape, dt, &CpuDevice).map_err(to_py_err)?;
+        let t = DeviceTensor::from_f64_slice(&data, &shape, dt, device).map_err(to_py_err)?;
         Ok(PyTensor { inner: t })
     }
 
     /// Create a tensor from a NumPy array.
     #[staticmethod]
-    fn from_numpy(_py: Python<'_>, arr: &Bound<'_, PyArrayDyn<f64>>) -> PyResult<Self> {
+    #[pyo3(signature = (arr, device="cpu"))]
+    fn from_numpy(_py: Python<'_>, arr: &Bound<'_, PyArrayDyn<f64>>, device: &str) -> PyResult<Self> {
         let readonly = arr
             .try_readonly()
             .map_err(|e| PyRuntimeError::new_err(format!("Cannot read array: {}", e)))?;
         let view = readonly.as_array();
         let shape: Vec<usize> = view.shape().to_vec();
         let data: Vec<f64> = view.iter().cloned().collect();
-        let t =
-            ShrewTensor::from_f64_slice(&data, shape, DType::F64, &CpuDevice).map_err(to_py_err)?;
+        let t = DeviceTensor::from_f64_slice(&data, &shape, DType::F64, device).map_err(to_py_err)?;
         Ok(PyTensor { inner: t })
     }
 
     #[staticmethod]
-    #[pyo3(signature = (shape, dtype="f32"))]
-    fn zeros(shape: Vec<usize>, dtype: &str) -> PyResult<Self> {
+    #[pyo3(signature = (shape, dtype="f32", device="cpu"))]
+    fn zeros(shape: Vec<usize>, dtype: &str, device: &str) -> PyResult<Self> {
         let dt = parse_dtype(dtype)?;
         Ok(PyTensor {
-            inner: ShrewTensor::zeros(shape, dt, &CpuDevice).map_err(to_py_err)?,
+            inner: DeviceTensor::zeros(&shape, dt, device).map_err(to_py_err)?,
         })
     }
 
     #[staticmethod]
-    #[pyo3(signature = (shape, dtype="f32"))]
-    fn ones(shape: Vec<usize>, dtype: &str) -> PyResult<Self> {
+    #[pyo3(signature = (shape, dtype="f32", device="cpu"))]
+    fn ones(shape: Vec<usize>, dtype: &str, device: &str) -> PyResult<Self> {
         let dt = parse_dtype(dtype)?;
         Ok(PyTensor {
-            inner: ShrewTensor::ones(shape, dt, &CpuDevice).map_err(to_py_err)?,
+            inner: DeviceTensor::ones(&shape, dt, device).map_err(to_py_err)?,
         })
     }
 
     #[staticmethod]
-    #[pyo3(signature = (shape, val, dtype="f32"))]
-    fn full(shape: Vec<usize>, val: f64, dtype: &str) -> PyResult<Self> {
+    #[pyo3(signature = (shape, val, dtype="f32", device="cpu"))]
+    fn full(shape: Vec<usize>, val: f64, dtype: &str, device: &str) -> PyResult<Self> {
         let dt = parse_dtype(dtype)?;
         Ok(PyTensor {
-            inner: ShrewTensor::full(shape, val, dt, &CpuDevice).map_err(to_py_err)?,
+            inner: DeviceTensor::full(&shape, val, dt, device).map_err(to_py_err)?,
         })
     }
 
     #[staticmethod]
-    #[pyo3(signature = (shape, dtype="f32"))]
-    fn rand(shape: Vec<usize>, dtype: &str) -> PyResult<Self> {
+    #[pyo3(signature = (shape, dtype="f32", device="cpu"))]
+    fn rand(shape: Vec<usize>, dtype: &str, device: &str) -> PyResult<Self> {
         let dt = parse_dtype(dtype)?;
         Ok(PyTensor {
-            inner: ShrewTensor::rand(shape, dt, &CpuDevice).map_err(to_py_err)?,
+            inner: DeviceTensor::rand(&shape, dt, device).map_err(to_py_err)?,
         })
     }
 
     #[staticmethod]
-    #[pyo3(signature = (shape, dtype="f32"))]
-    fn randn(shape: Vec<usize>, dtype: &str) -> PyResult<Self> {
+    #[pyo3(signature = (shape, dtype="f32", device="cpu"))]
+    fn randn(shape: Vec<usize>, dtype: &str, device: &str) -> PyResult<Self> {
         let dt = parse_dtype(dtype)?;
         Ok(PyTensor {
-            inner: ShrewTensor::randn(shape, dt, &CpuDevice).map_err(to_py_err)?,
+            inner: DeviceTensor::randn(&shape, dt, device).map_err(to_py_err)?,
         })
     }
 
     #[staticmethod]
-    #[pyo3(signature = (start, end, steps, dtype="f32"))]
-    fn linspace(start: f64, end: f64, steps: usize, dtype: &str) -> PyResult<Self> {
+    #[pyo3(signature = (start, end, steps, dtype="f32", device="cpu"))]
+    fn linspace(start: f64, end: f64, steps: usize, dtype: &str, device: &str) -> PyResult<Self> {
         let dt = parse_dtype(dtype)?;
-        Ok(PyTensor {
-            inner: ShrewTensor::linspace(start, end, steps, dt, &CpuDevice).map_err(to_py_err)?,
-        })
+        let t = DeviceTensor::Cpu(ShrewTensor::linspace(start, end, steps, dt, &CpuDevice).map_err(to_py_err)?);
+        if device.starts_with("cuda") {
+            let ord = device.strip_prefix("cuda:").and_then(|s| s.parse().ok()).unwrap_or(0);
+            Ok(PyTensor { inner: t.cuda(ord).map_err(to_py_err)? })
+        } else {
+            Ok(PyTensor { inner: t })
+        }
     }
 
     #[staticmethod]
-    #[pyo3(signature = (n, dtype="f32"))]
-    fn eye(n: usize, dtype: &str) -> PyResult<Self> {
+    #[pyo3(signature = (n, dtype="f32", device="cpu"))]
+    fn eye(n: usize, dtype: &str, device: &str) -> PyResult<Self> {
         let dt = parse_dtype(dtype)?;
-        Ok(PyTensor {
-            inner: ShrewTensor::eye(n, dt, &CpuDevice).map_err(to_py_err)?,
-        })
+        let t = DeviceTensor::Cpu(ShrewTensor::eye(n, dt, &CpuDevice).map_err(to_py_err)?);
+        if device.starts_with("cuda") {
+            let ord = device.strip_prefix("cuda:").and_then(|s| s.parse().ok()).unwrap_or(0);
+            Ok(PyTensor { inner: t.cuda(ord).map_err(to_py_err)? })
+        } else {
+            Ok(PyTensor { inner: t })
+        }
     }
 
     #[staticmethod]
-    #[pyo3(signature = (n, dtype="f32"))]
-    fn arange(n: usize, dtype: &str) -> PyResult<Self> {
+    #[pyo3(signature = (n, dtype="f32", device="cpu"))]
+    fn arange(n: usize, dtype: &str, device: &str) -> PyResult<Self> {
         let dt = parse_dtype(dtype)?;
-        Ok(PyTensor {
-            inner: ShrewTensor::arange(n, dt, &CpuDevice).map_err(to_py_err)?,
-        })
+        let t = DeviceTensor::Cpu(ShrewTensor::arange(n, dt, &CpuDevice).map_err(to_py_err)?);
+        if device.starts_with("cuda") {
+            let ord = device.strip_prefix("cuda:").and_then(|s| s.parse().ok()).unwrap_or(0);
+            Ok(PyTensor { inner: t.cuda(ord).map_err(to_py_err)? })
+        } else {
+            Ok(PyTensor { inner: t })
+        }
     }
 
     #[staticmethod]
-    #[pyo3(signature = (start, end, step, dtype="f32"))]
-    fn arange_step(start: f64, end: f64, step: f64, dtype: &str) -> PyResult<Self> {
+    #[pyo3(signature = (start, end, step, dtype="f32", device="cpu"))]
+    fn arange_step(start: f64, end: f64, step: f64, dtype: &str, device: &str) -> PyResult<Self> {
         let dt = parse_dtype(dtype)?;
-        Ok(PyTensor {
-            inner: ShrewTensor::arange_step(start, end, step, dt, &CpuDevice).map_err(to_py_err)?,
-        })
+        let t = DeviceTensor::Cpu(ShrewTensor::arange_step(start, end, step, dt, &CpuDevice).map_err(to_py_err)?);
+        if device.starts_with("cuda") {
+            let ord = device.strip_prefix("cuda:").and_then(|s| s.parse().ok()).unwrap_or(0);
+            Ok(PyTensor { inner: t.cuda(ord).map_err(to_py_err)? })
+        } else {
+            Ok(PyTensor { inner: t })
+        }
     }
 
     #[staticmethod]
-    #[pyo3(signature = (n, m, diagonal=0, dtype="f32"))]
-    fn triu(n: usize, m: usize, diagonal: i64, dtype: &str) -> PyResult<Self> {
+    #[pyo3(signature = (n, m, diagonal=0, dtype="f32", device="cpu"))]
+    fn triu(n: usize, m: usize, diagonal: i64, dtype: &str, device: &str) -> PyResult<Self> {
         let dt = parse_dtype(dtype)?;
-        Ok(PyTensor {
-            inner: ShrewTensor::triu(n, m, diagonal, dt, &CpuDevice).map_err(to_py_err)?,
-        })
+        let t = DeviceTensor::Cpu(ShrewTensor::triu(n, m, diagonal, dt, &CpuDevice).map_err(to_py_err)?);
+        if device.starts_with("cuda") {
+            let ord = device.strip_prefix("cuda:").and_then(|s| s.parse().ok()).unwrap_or(0);
+            Ok(PyTensor { inner: t.cuda(ord).map_err(to_py_err)? })
+        } else {
+            Ok(PyTensor { inner: t })
+        }
     }
 
     #[staticmethod]
-    #[pyo3(signature = (n, m, diagonal=0, dtype="f32"))]
-    fn tril(n: usize, m: usize, diagonal: i64, dtype: &str) -> PyResult<Self> {
+    #[pyo3(signature = (n, m, diagonal=0, dtype="f32", device="cpu"))]
+    fn tril(n: usize, m: usize, diagonal: i64, dtype: &str, device: &str) -> PyResult<Self> {
         let dt = parse_dtype(dtype)?;
-        Ok(PyTensor {
-            inner: ShrewTensor::tril(n, m, diagonal, dt, &CpuDevice).map_err(to_py_err)?,
-        })
+        let t = DeviceTensor::Cpu(ShrewTensor::tril(n, m, diagonal, dt, &CpuDevice).map_err(to_py_err)?);
+        if device.starts_with("cuda") {
+            let ord = device.strip_prefix("cuda:").and_then(|s| s.parse().ok()).unwrap_or(0);
+            Ok(PyTensor { inner: t.cuda(ord).map_err(to_py_err)? })
+        } else {
+            Ok(PyTensor { inner: t })
+        }
     }
 
     fn zeros_like(&self) -> PyResult<Self> {
         Ok(PyTensor {
-            inner: ShrewTensor::zeros_like(&self.inner).map_err(to_py_err)?,
+            inner: self.inner.zeros_like().map_err(to_py_err)?,
         })
     }
 
     fn ones_like(&self) -> PyResult<Self> {
         Ok(PyTensor {
-            inner: ShrewTensor::ones_like(&self.inner).map_err(to_py_err)?,
+            inner: self.inner.ones_like().map_err(to_py_err)?,
         })
     }
 
     fn full_like(&self, val: f64) -> PyResult<Self> {
         Ok(PyTensor {
-            inner: ShrewTensor::full_like(&self.inner, val).map_err(to_py_err)?,
+            inner: self.inner.full_like(val).map_err(to_py_err)?,
         })
     }
 
@@ -586,7 +632,7 @@ impl PyTensor {
 
     fn reshape(&self, shape: Vec<usize>) -> PyResult<Self> {
         Ok(PyTensor {
-            inner: self.inner.reshape(shape).map_err(to_py_err)?,
+            inner: self.inner.reshape(&shape).map_err(to_py_err)?,
         })
     }
     fn transpose(&self, dim0: usize, dim1: usize) -> PyResult<Self> {
@@ -660,39 +706,48 @@ impl PyTensor {
 
     #[staticmethod]
     fn cat(tensors: Vec<PyRef<PyTensor>>, dim: usize) -> PyResult<Self> {
-        let inners: Vec<ShrewTensor> = tensors.iter().map(|t| t.inner.clone()).collect();
+        let mut inners = Vec::with_capacity(tensors.len());
+        for t in &tensors {
+            inners.push(t.inner.to_cpu().map_err(to_py_err)?);
+        }
         Ok(PyTensor {
-            inner: ShrewTensor::cat(&inners, dim).map_err(to_py_err)?,
+            inner: DeviceTensor::Cpu(ShrewTensor::cat(&inners, dim).map_err(to_py_err)?),
         })
     }
 
     #[staticmethod]
     fn stack(tensors: Vec<PyRef<PyTensor>>, dim: usize) -> PyResult<Self> {
-        let inners: Vec<ShrewTensor> = tensors.iter().map(|t| t.inner.clone()).collect();
+        let mut inners = Vec::with_capacity(tensors.len());
+        for t in &tensors {
+            inners.push(t.inner.to_cpu().map_err(to_py_err)?);
+        }
         Ok(PyTensor {
-            inner: ShrewTensor::stack(&inners, dim).map_err(to_py_err)?,
+            inner: DeviceTensor::Cpu(ShrewTensor::stack(&inners, dim).map_err(to_py_err)?),
         })
     }
 
     //  Indexing / selection
 
     fn index_select(&self, dim: usize, indices: &PyTensor) -> PyResult<Self> {
+        let cpu_self = self.inner.to_cpu().map_err(to_py_err)?;
+        let cpu_indices = indices.inner.to_cpu().map_err(to_py_err)?;
         Ok(PyTensor {
-            inner: self
-                .inner
-                .index_select(dim, &indices.inner)
-                .map_err(to_py_err)?,
+            inner: DeviceTensor::Cpu(cpu_self.index_select(dim, &cpu_indices).map_err(to_py_err)?),
         })
     }
     fn gather(&self, dim: usize, index: &PyTensor) -> PyResult<Self> {
+        let cpu_self = self.inner.to_cpu().map_err(to_py_err)?;
+        let cpu_index = index.inner.to_cpu().map_err(to_py_err)?;
         Ok(PyTensor {
-            inner: self.inner.gather(dim, &index.inner).map_err(to_py_err)?,
+            inner: DeviceTensor::Cpu(cpu_self.gather(dim, &cpu_index).map_err(to_py_err)?),
         })
     }
     fn where_cond(&self, on_true: &PyTensor, on_false: &PyTensor) -> PyResult<Self> {
+        let cpu_self = self.inner.to_cpu().map_err(to_py_err)?;
+        let cpu_true = on_true.inner.to_cpu().map_err(to_py_err)?;
+        let cpu_false = on_false.inner.to_cpu().map_err(to_py_err)?;
         Ok(PyTensor {
-            inner: ShrewTensor::where_cond(&self.inner, &on_true.inner, &on_false.inner)
-                .map_err(to_py_err)?,
+            inner: DeviceTensor::Cpu(ShrewTensor::where_cond(&cpu_self, &cpu_true, &cpu_false).map_err(to_py_err)?),
         })
     }
 
@@ -700,18 +755,21 @@ impl PyTensor {
 
     #[pyo3(signature = (dim, descending=false))]
     fn sort(&self, dim: usize, descending: bool) -> PyResult<(Self, Self)> {
-        let (vals, idxs) = self.inner.sort(dim, descending).map_err(to_py_err)?;
-        Ok((PyTensor { inner: vals }, PyTensor { inner: idxs }))
+        let cpu_self = self.inner.to_cpu().map_err(to_py_err)?;
+        let (vals, idxs) = cpu_self.sort(dim, descending).map_err(to_py_err)?;
+        Ok((PyTensor { inner: DeviceTensor::Cpu(vals) }, PyTensor { inner: DeviceTensor::Cpu(idxs) }))
     }
     #[pyo3(signature = (dim, descending=false))]
     fn argsort(&self, dim: usize, descending: bool) -> PyResult<Self> {
+        let cpu_self = self.inner.to_cpu().map_err(to_py_err)?;
         Ok(PyTensor {
-            inner: self.inner.argsort(dim, descending).map_err(to_py_err)?,
+            inner: DeviceTensor::Cpu(cpu_self.argsort(dim, descending).map_err(to_py_err)?),
         })
     }
     fn topk(&self, k: usize, dim: usize) -> PyResult<(Self, Vec<usize>)> {
-        let (vals, idxs) = self.inner.topk(k, dim).map_err(to_py_err)?;
-        Ok((PyTensor { inner: vals }, idxs))
+        let cpu_self = self.inner.to_cpu().map_err(to_py_err)?;
+        let (vals, idxs) = cpu_self.topk(k, dim).map_err(to_py_err)?;
+        Ok((PyTensor { inner: DeviceTensor::Cpu(vals) }, idxs))
     }
 
     //  Conv/Pool convenience
@@ -724,10 +782,11 @@ impl PyTensor {
         stride: [usize; 2],
         padding: [usize; 2],
     ) -> PyResult<Self> {
+        let b = bias.map(|b| &b.inner);
         Ok(PyTensor {
             inner: self
                 .inner
-                .conv2d(&weight.inner, bias.map(|b| &b.inner), stride, padding)
+                .conv2d(&weight.inner, b, stride, padding)
                 .map_err(to_py_err)?,
         })
     }
@@ -740,11 +799,11 @@ impl PyTensor {
         stride: usize,
         padding: usize,
     ) -> PyResult<Self> {
+        let cpu_self = self.inner.to_cpu().map_err(to_py_err)?;
+        let cpu_w = weight.inner.to_cpu().map_err(to_py_err)?;
+        let cpu_b = if let Some(b) = bias { Some(b.inner.to_cpu().map_err(to_py_err)?) } else { None };
         Ok(PyTensor {
-            inner: self
-                .inner
-                .conv1d(&weight.inner, bias.map(|b| &b.inner), stride, padding)
-                .map_err(to_py_err)?,
+            inner: DeviceTensor::Cpu(cpu_self.conv1d(&cpu_w, cpu_b.as_ref(), stride, padding).map_err(to_py_err)?),
         })
     }
 
@@ -755,11 +814,9 @@ impl PyTensor {
         stride: [usize; 2],
         padding: [usize; 2],
     ) -> PyResult<Self> {
+        let cpu_self = self.inner.to_cpu().map_err(to_py_err)?;
         Ok(PyTensor {
-            inner: self
-                .inner
-                .max_pool2d(kernel_size, stride, padding)
-                .map_err(to_py_err)?,
+            inner: DeviceTensor::Cpu(cpu_self.max_pool2d(kernel_size, stride, padding).map_err(to_py_err)?),
         })
     }
 
@@ -770,11 +827,9 @@ impl PyTensor {
         stride: [usize; 2],
         padding: [usize; 2],
     ) -> PyResult<Self> {
+        let cpu_self = self.inner.to_cpu().map_err(to_py_err)?;
         Ok(PyTensor {
-            inner: self
-                .inner
-                .avg_pool2d(kernel_size, stride, padding)
-                .map_err(to_py_err)?,
+            inner: DeviceTensor::Cpu(cpu_self.avg_pool2d(kernel_size, stride, padding).map_err(to_py_err)?),
         })
     }
 
@@ -789,9 +844,17 @@ impl PyTensor {
     //  Autograd
 
     fn backward(&self) -> PyResult<PyGradStore> {
-        Ok(PyGradStore {
-            inner: self.inner.backward().map_err(to_py_err)?,
-        })
+        match &self.inner {
+            DeviceTensor::Cpu(t) => {
+                let store = t.backward().map_err(to_py_err)?;
+                Ok(PyGradStore { inner: GradStoreInner::Cpu(store) })
+            }
+            #[cfg(feature = "cuda")]
+            DeviceTensor::Cuda(t) => {
+                let store = t.backward().map_err(to_py_err)?;
+                Ok(PyGradStore { inner: GradStoreInner::Cuda(store) })
+            }
+        }
     }
 
     //  Display
@@ -799,45 +862,88 @@ impl PyTensor {
     fn __repr__(&self) -> String {
         let dt = dtype_to_str(self.inner.dtype());
         let shape = self.inner.dims();
+        let dev = self.inner.device_name();
         if self.inner.elem_count() <= 10 {
             if let Ok(data) = self.inner.to_f64_vec() {
-                return format!("Tensor({:?}, shape={:?}, dtype={}, dev=Cpu)", data, shape, dt);
+                return format!("Tensor({:?}, shape={:?}, dtype={}, device='{}')", data, shape, dt, dev);
             }
         }
-        format!("Tensor(shape={:?}, dtype={}, dev=Cpu)", shape, dt)
+        format!("Tensor(shape={:?}, dtype={}, device='{}')", shape, dt, dev)
     }
 
     fn __str__(&self) -> String {
         self.__repr__()
     }
 
-    /// Return the device string of this tensor ('cpu').
+    /// Return the device string of this tensor ('cpu' or 'cuda:0').
     #[getter]
-    fn device(&self) -> &'static str {
-        "cpu"
+    fn device(&self) -> String {
+        self.inner.device_name()
     }
 
     /// Return whether this tensor is hosted on a CUDA GPU.
     #[getter]
     fn is_cuda(&self) -> bool {
-        false
+        self.inner.is_cuda()
+    }
+
+    /// Move tensor to CUDA GPU.
+    #[pyo3(signature = (device_id=0))]
+    fn cuda(&self, device_id: usize) -> PyResult<Self> {
+        Ok(PyTensor {
+            inner: self.inner.cuda(device_id).map_err(to_py_err)?,
+        })
+    }
+
+    /// Move tensor to CPU host memory.
+    fn cpu(&self) -> PyResult<Self> {
+        Ok(PyTensor {
+            inner: self.inner.cpu().map_err(to_py_err)?,
+        })
+    }
+
+    /// Move tensor to target device ("cpu" or "cuda" / "cuda:0").
+    fn to(&self, device: &str) -> PyResult<Self> {
+        if device == "cpu" {
+            self.cpu()
+        } else if device.starts_with("cuda") {
+            let ord = device.strip_prefix("cuda:").and_then(|s| s.parse().ok()).unwrap_or(0);
+            self.cuda(ord)
+        } else {
+            Err(PyValueError::new_err(format!("Unknown device: {device}")))
+        }
     }
 }
 
 // PyGradStore
 
+#[derive(Clone)]
+enum GradStoreInner {
+    Cpu(GradStore<CpuBackend>),
+    #[cfg(feature = "cuda")]
+    Cuda(GradStore<shrew_cuda::CudaBackend>),
+}
+
 #[pyclass(name = "GradStore")]
 #[derive(Clone)]
 struct PyGradStore {
-    inner: GradStore<B>,
+    inner: GradStoreInner,
 }
 
 #[pymethods]
 impl PyGradStore {
     fn grad(&self, tensor: &PyTensor) -> Option<PyTensor> {
-        self.inner
-            .get(&tensor.inner)
-            .map(|g| PyTensor { inner: g.clone() })
+        match (&self.inner, &tensor.inner) {
+            (GradStoreInner::Cpu(store), DeviceTensor::Cpu(t)) => {
+                store.get(t).map(|g| PyTensor { inner: DeviceTensor::Cpu(g.clone()) })
+            }
+            #[cfg(feature = "cuda")]
+            (GradStoreInner::Cuda(store), DeviceTensor::Cuda(t)) => {
+                store.get(t).map(|g| PyTensor { inner: DeviceTensor::Cuda(g.clone()) })
+            }
+            #[allow(unreachable_patterns)]
+            _ => None,
+        }
     }
 }
 
@@ -902,10 +1008,11 @@ impl PyExecutor {
         graph_name: &str,
         inputs: std::collections::HashMap<String, PyRef<PyTensor>>,
     ) -> PyResult<std::collections::HashMap<String, PyTensor>> {
-        let rust_inputs: std::collections::HashMap<String, ShrewTensor> = inputs
-            .into_iter()
-            .map(|(k, v)| (k, v.inner.clone()))
-            .collect();
+        let mut rust_inputs: std::collections::HashMap<String, ShrewTensor> =
+            std::collections::HashMap::with_capacity(inputs.len());
+        for (k, v) in inputs {
+            rust_inputs.insert(k, v.to_cpu_shrew()?);
+        }
         let result = self
             .inner
             .run(graph_name, &rust_inputs)
@@ -913,7 +1020,7 @@ impl PyExecutor {
         let outputs = result
             .outputs
             .into_iter()
-            .map(|(k, v)| (k, PyTensor { inner: v }))
+            .map(|(k, v)| (k, PyTensor::from(v)))
             .collect();
         Ok(outputs)
     }
@@ -923,13 +1030,17 @@ impl PyExecutor {
         self.inner
             .named_params()
             .into_iter()
-            .map(|(k, v)| (k, PyTensor { inner: v }))
+            .map(|(k, v)| (k, PyTensor::from(v)))
             .collect()
     }
 
     /// Set a parameter by key (e.g. "Forward/w1").
     fn set_param(&mut self, key: &str, tensor: &PyTensor) -> bool {
-        self.inner.set_param_by_key(key, tensor.inner.clone())
+        if let Ok(cpu_t) = tensor.to_cpu_shrew() {
+            self.inner.set_param_by_key(key, cpu_t)
+        } else {
+            false
+        }
     }
 
     /// Get the list of input names for a graph.
@@ -1004,9 +1115,8 @@ impl PyLinear {
 
     fn forward(&self, x: &PyTensor) -> PyResult<PyTensor> {
         use shrew_nn::Module;
-        Ok(PyTensor {
-            inner: self.inner.forward(&x.inner).map_err(to_py_err)?,
-        })
+        let out = self.inner.forward(&x.to_cpu_shrew()?).map_err(to_py_err)?;
+        Ok(PyTensor::from(out))
     }
 
     fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
@@ -1018,7 +1128,7 @@ impl PyLinear {
         self.inner
             .parameters()
             .into_iter()
-            .map(|p| PyTensor { inner: p })
+            .map(PyTensor::from)
             .collect()
     }
 }
@@ -1060,9 +1170,8 @@ impl PyConv2d {
 
     fn forward(&self, x: &PyTensor) -> PyResult<PyTensor> {
         use shrew_nn::Module;
-        Ok(PyTensor {
-            inner: self.inner.forward(&x.inner).map_err(to_py_err)?,
-        })
+        let out = self.inner.forward(&x.to_cpu_shrew()?).map_err(to_py_err)?;
+        Ok(PyTensor::from(out))
     }
     fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
         self.forward(x)
@@ -1072,7 +1181,7 @@ impl PyConv2d {
         self.inner
             .parameters()
             .into_iter()
-            .map(|p| PyTensor { inner: p })
+            .map(PyTensor::from)
             .collect()
     }
 }
@@ -1114,9 +1223,8 @@ impl PyConv1d {
 
     fn forward(&self, x: &PyTensor) -> PyResult<PyTensor> {
         use shrew_nn::Module;
-        Ok(PyTensor {
-            inner: self.inner.forward(&x.inner).map_err(to_py_err)?,
-        })
+        let out = self.inner.forward(&x.to_cpu_shrew()?).map_err(to_py_err)?;
+        Ok(PyTensor::from(out))
     }
     fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
         self.forward(x)
@@ -1126,7 +1234,7 @@ impl PyConv1d {
         self.inner
             .parameters()
             .into_iter()
-            .map(|p| PyTensor { inner: p })
+            .map(PyTensor::from)
             .collect()
     }
 }
@@ -1151,9 +1259,8 @@ impl PyBatchNorm2d {
 
     fn forward(&self, x: &PyTensor) -> PyResult<PyTensor> {
         use shrew_nn::Module;
-        Ok(PyTensor {
-            inner: self.inner.forward(&x.inner).map_err(to_py_err)?,
-        })
+        let out = self.inner.forward(&x.to_cpu_shrew()?).map_err(to_py_err)?;
+        Ok(PyTensor::from(out))
     }
     fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
         self.forward(x)
@@ -1163,7 +1270,7 @@ impl PyBatchNorm2d {
         self.inner
             .parameters()
             .into_iter()
-            .map(|p| PyTensor { inner: p })
+            .map(PyTensor::from)
             .collect()
     }
 }
@@ -1188,9 +1295,8 @@ impl PyLayerNorm {
 
     fn forward(&self, x: &PyTensor) -> PyResult<PyTensor> {
         use shrew_nn::Module;
-        Ok(PyTensor {
-            inner: self.inner.forward(&x.inner).map_err(to_py_err)?,
-        })
+        let out = self.inner.forward(&x.to_cpu_shrew()?).map_err(to_py_err)?;
+        Ok(PyTensor::from(out))
     }
     fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
         self.forward(x)
@@ -1200,7 +1306,7 @@ impl PyLayerNorm {
         self.inner
             .parameters()
             .into_iter()
-            .map(|p| PyTensor { inner: p })
+            .map(PyTensor::from)
             .collect()
     }
 }
@@ -1225,9 +1331,8 @@ impl PyGroupNorm {
 
     fn forward(&self, x: &PyTensor) -> PyResult<PyTensor> {
         use shrew_nn::Module;
-        Ok(PyTensor {
-            inner: self.inner.forward(&x.inner).map_err(to_py_err)?,
-        })
+        let out = self.inner.forward(&x.to_cpu_shrew()?).map_err(to_py_err)?;
+        Ok(PyTensor::from(out))
     }
     fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
         self.forward(x)
@@ -1237,7 +1342,7 @@ impl PyGroupNorm {
         self.inner
             .parameters()
             .into_iter()
-            .map(|p| PyTensor { inner: p })
+            .map(PyTensor::from)
             .collect()
     }
 }
@@ -1262,9 +1367,8 @@ impl PyRMSNorm {
 
     fn forward(&self, x: &PyTensor) -> PyResult<PyTensor> {
         use shrew_nn::Module;
-        Ok(PyTensor {
-            inner: self.inner.forward(&x.inner).map_err(to_py_err)?,
-        })
+        let out = self.inner.forward(&x.to_cpu_shrew()?).map_err(to_py_err)?;
+        Ok(PyTensor::from(out))
     }
     fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
         self.forward(x)
@@ -1274,7 +1378,7 @@ impl PyRMSNorm {
         self.inner
             .parameters()
             .into_iter()
-            .map(|p| PyTensor { inner: p })
+            .map(PyTensor::from)
             .collect()
     }
 }
@@ -1299,9 +1403,8 @@ impl PyEmbedding {
 
     fn forward(&self, x: &PyTensor) -> PyResult<PyTensor> {
         use shrew_nn::Module;
-        Ok(PyTensor {
-            inner: self.inner.forward(&x.inner).map_err(to_py_err)?,
-        })
+        let out = self.inner.forward(&x.to_cpu_shrew()?).map_err(to_py_err)?;
+        Ok(PyTensor::from(out))
     }
     fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
         self.forward(x)
@@ -1311,7 +1414,7 @@ impl PyEmbedding {
         self.inner
             .parameters()
             .into_iter()
-            .map(|p| PyTensor { inner: p })
+            .map(PyTensor::from)
             .collect()
     }
 }
@@ -1334,9 +1437,8 @@ impl PyDropout {
     }
 
     fn forward(&self, x: &PyTensor) -> PyResult<PyTensor> {
-        Ok(PyTensor {
-            inner: self.inner.forward_t::<B>(&x.inner).map_err(to_py_err)?,
-        })
+        let out = self.inner.forward_t::<B>(&x.to_cpu_shrew()?).map_err(to_py_err)?;
+        Ok(PyTensor::from(out))
     }
     fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
         self.forward(x)
@@ -1365,9 +1467,8 @@ impl PyFlatten {
 
     fn forward(&self, x: &PyTensor) -> PyResult<PyTensor> {
         use shrew_nn::Module;
-        Ok(PyTensor {
-            inner: self.inner.forward(&x.inner).map_err(to_py_err)?,
-        })
+        let out = self.inner.forward(&x.to_cpu_shrew()?).map_err(to_py_err)?;
+        Ok(PyTensor::from(out))
     }
     fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
         self.forward(x)
@@ -1396,9 +1497,8 @@ impl PyMaxPool2d {
 
     fn forward(&self, x: &PyTensor) -> PyResult<PyTensor> {
         use shrew_nn::Module;
-        Ok(PyTensor {
-            inner: self.inner.forward(&x.inner).map_err(to_py_err)?,
-        })
+        let out = self.inner.forward(&x.to_cpu_shrew()?).map_err(to_py_err)?;
+        Ok(PyTensor::from(out))
     }
     fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
         self.forward(x)
@@ -1427,9 +1527,8 @@ impl PyAvgPool2d {
 
     fn forward(&self, x: &PyTensor) -> PyResult<PyTensor> {
         use shrew_nn::Module;
-        Ok(PyTensor {
-            inner: self.inner.forward(&x.inner).map_err(to_py_err)?,
-        })
+        let out = self.inner.forward(&x.to_cpu_shrew()?).map_err(to_py_err)?;
+        Ok(PyTensor::from(out))
     }
     fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
         self.forward(x)
@@ -1457,9 +1556,8 @@ impl PyAdaptiveAvgPool2d {
 
     fn forward(&self, x: &PyTensor) -> PyResult<PyTensor> {
         use shrew_nn::Module;
-        Ok(PyTensor {
-            inner: self.inner.forward(&x.inner).map_err(to_py_err)?,
-        })
+        let out = self.inner.forward(&x.to_cpu_shrew()?).map_err(to_py_err)?;
+        Ok(PyTensor::from(out))
     }
     fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
         self.forward(x)
@@ -1490,9 +1588,8 @@ impl PyMultiHeadAttention {
 
     fn forward(&self, x: &PyTensor) -> PyResult<PyTensor> {
         use shrew_nn::Module;
-        Ok(PyTensor {
-            inner: self.inner.forward(&x.inner).map_err(to_py_err)?,
-        })
+        let out = self.inner.forward(&x.to_cpu_shrew()?).map_err(to_py_err)?;
+        Ok(PyTensor::from(out))
     }
     fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
         self.forward(x)
@@ -1502,7 +1599,7 @@ impl PyMultiHeadAttention {
         self.inner
             .parameters()
             .into_iter()
-            .map(|p| PyTensor { inner: p })
+            .map(PyTensor::from)
             .collect()
     }
 }
@@ -1534,9 +1631,8 @@ impl PyTransformerBlock {
 
     fn forward(&self, x: &PyTensor) -> PyResult<PyTensor> {
         use shrew_nn::Module;
-        Ok(PyTensor {
-            inner: self.inner.forward(&x.inner).map_err(to_py_err)?,
-        })
+        let out = self.inner.forward(&x.to_cpu_shrew()?).map_err(to_py_err)?;
+        Ok(PyTensor::from(out))
     }
     fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
         self.forward(x)
@@ -1546,7 +1642,7 @@ impl PyTransformerBlock {
         self.inner
             .parameters()
             .into_iter()
-            .map(|p| PyTensor { inner: p })
+            .map(PyTensor::from)
             .collect()
     }
 }
@@ -1570,15 +1666,14 @@ impl PyRNNCell {
     }
 
     fn forward(&self, x: &PyTensor, h: &PyTensor) -> PyResult<PyTensor> {
-        Ok(PyTensor {
-            inner: self.inner.forward(&x.inner, &h.inner).map_err(to_py_err)?,
-        })
+        let out = self.inner.forward(&x.to_cpu_shrew()?, &h.to_cpu_shrew()?).map_err(to_py_err)?;
+        Ok(PyTensor::from(out))
     }
     fn parameters(&self) -> Vec<PyTensor> {
         self.inner
             .parameters()
             .into_iter()
-            .map(|p| PyTensor { inner: p })
+            .map(PyTensor::from)
             .collect()
     }
 }
@@ -1604,17 +1699,22 @@ impl PyRNN {
     /// Returns (output, h_n).
     #[pyo3(signature = (x, h0=None))]
     fn forward(&self, x: &PyTensor, h0: Option<&PyTensor>) -> PyResult<(PyTensor, PyTensor)> {
+        let x_cpu = x.to_cpu_shrew()?;
+        let h0_cpu = match h0 {
+            Some(h) => Some(h.to_cpu_shrew()?),
+            None => None,
+        };
         let (out, hn) = self
             .inner
-            .forward(&x.inner, h0.map(|h| &h.inner))
+            .forward(&x_cpu, h0_cpu.as_ref())
             .map_err(to_py_err)?;
-        Ok((PyTensor { inner: out }, PyTensor { inner: hn }))
+        Ok((PyTensor::from(out), PyTensor::from(hn)))
     }
     fn parameters(&self) -> Vec<PyTensor> {
         self.inner
             .parameters()
             .into_iter()
-            .map(|p| PyTensor { inner: p })
+            .map(PyTensor::from)
             .collect()
     }
 }
@@ -1641,15 +1741,15 @@ impl PyLSTMCell {
     fn forward(&self, x: &PyTensor, h: &PyTensor, c: &PyTensor) -> PyResult<(PyTensor, PyTensor)> {
         let (h_new, c_new) = self
             .inner
-            .forward(&x.inner, &h.inner, &c.inner)
+            .forward(&x.to_cpu_shrew()?, &h.to_cpu_shrew()?, &c.to_cpu_shrew()?)
             .map_err(to_py_err)?;
-        Ok((PyTensor { inner: h_new }, PyTensor { inner: c_new }))
+        Ok((PyTensor::from(h_new), PyTensor::from(c_new)))
     }
     fn parameters(&self) -> Vec<PyTensor> {
         self.inner
             .parameters()
             .into_iter()
-            .map(|p| PyTensor { inner: p })
+            .map(PyTensor::from)
             .collect()
     }
 }
@@ -1680,22 +1780,31 @@ impl PyLSTM {
         h0: Option<&PyTensor>,
         c0: Option<&PyTensor>,
     ) -> PyResult<(PyTensor, PyTensor, PyTensor)> {
-        let hc0 = match (h0, c0) {
-            (Some(h), Some(c)) => Some((&h.inner, &c.inner)),
+        let x_cpu = x.to_cpu_shrew()?;
+        let h0_cpu = match h0 {
+            Some(h) => Some(h.to_cpu_shrew()?),
+            None => None,
+        };
+        let c0_cpu = match c0 {
+            Some(c) => Some(c.to_cpu_shrew()?),
+            None => None,
+        };
+        let hc0 = match (&h0_cpu, &c0_cpu) {
+            (Some(h), Some(c)) => Some((h, c)),
             _ => None,
         };
-        let (out, (hn, cn)) = self.inner.forward(&x.inner, hc0).map_err(to_py_err)?;
+        let (out, (hn, cn)) = self.inner.forward(&x_cpu, hc0).map_err(to_py_err)?;
         Ok((
-            PyTensor { inner: out },
-            PyTensor { inner: hn },
-            PyTensor { inner: cn },
+            PyTensor::from(out),
+            PyTensor::from(hn),
+            PyTensor::from(cn),
         ))
     }
     fn parameters(&self) -> Vec<PyTensor> {
         self.inner
             .parameters()
             .into_iter()
-            .map(|p| PyTensor { inner: p })
+            .map(PyTensor::from)
             .collect()
     }
 }
@@ -1719,15 +1828,14 @@ impl PyGRUCell {
     }
 
     fn forward(&self, x: &PyTensor, h: &PyTensor) -> PyResult<PyTensor> {
-        Ok(PyTensor {
-            inner: self.inner.forward(&x.inner, &h.inner).map_err(to_py_err)?,
-        })
+        let out = self.inner.forward(&x.to_cpu_shrew()?, &h.to_cpu_shrew()?).map_err(to_py_err)?;
+        Ok(PyTensor::from(out))
     }
     fn parameters(&self) -> Vec<PyTensor> {
         self.inner
             .parameters()
             .into_iter()
-            .map(|p| PyTensor { inner: p })
+            .map(PyTensor::from)
             .collect()
     }
 }
@@ -1753,17 +1861,22 @@ impl PyGRU {
     /// Returns (output, h_n).
     #[pyo3(signature = (x, h0=None))]
     fn forward(&self, x: &PyTensor, h0: Option<&PyTensor>) -> PyResult<(PyTensor, PyTensor)> {
+        let x_cpu = x.to_cpu_shrew()?;
+        let h0_cpu = match h0 {
+            Some(h) => Some(h.to_cpu_shrew()?),
+            None => None,
+        };
         let (out, hn) = self
             .inner
-            .forward(&x.inner, h0.map(|h| &h.inner))
+            .forward(&x_cpu, h0_cpu.as_ref())
             .map_err(to_py_err)?;
-        Ok((PyTensor { inner: out }, PyTensor { inner: hn }))
+        Ok((PyTensor::from(out), PyTensor::from(hn)))
     }
     fn parameters(&self) -> Vec<PyTensor> {
         self.inner
             .parameters()
             .into_iter()
-            .map(|p| PyTensor { inner: p })
+            .map(PyTensor::from)
             .collect()
     }
 }
@@ -1786,9 +1899,8 @@ macro_rules! py_activation_unit {
 
             fn forward(&self, x: &PyTensor) -> PyResult<PyTensor> {
                 use shrew_nn::Module;
-                Ok(PyTensor {
-                    inner: self.inner.forward(&x.inner).map_err(to_py_err)?,
-                })
+                let out = self.inner.forward(&x.to_cpu_shrew()?).map_err(to_py_err)?;
+                Ok(PyTensor::from(out))
             }
 
             fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
@@ -1826,9 +1938,8 @@ impl PyLeakyReLU {
     }
     fn forward(&self, x: &PyTensor) -> PyResult<PyTensor> {
         use shrew_nn::Module;
-        Ok(PyTensor {
-            inner: self.inner.forward(&x.inner).map_err(to_py_err)?,
-        })
+        let out = self.inner.forward(&x.to_cpu_shrew()?).map_err(to_py_err)?;
+        Ok(PyTensor::from(out))
     }
     fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
         self.forward(x)
@@ -1851,9 +1962,8 @@ impl PyELU {
     }
     fn forward(&self, x: &PyTensor) -> PyResult<PyTensor> {
         use shrew_nn::Module;
-        Ok(PyTensor {
-            inner: self.inner.forward(&x.inner).map_err(to_py_err)?,
-        })
+        let out = self.inner.forward(&x.to_cpu_shrew()?).map_err(to_py_err)?;
+        Ok(PyTensor::from(out))
     }
     fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
         self.forward(x)
@@ -1879,7 +1989,10 @@ impl PySGD {
         momentum: f64,
         weight_decay: f64,
     ) -> PyResult<Self> {
-        let ps: Vec<ShrewTensor> = params.iter().map(|t| t.inner.clone()).collect();
+        let mut ps = Vec::with_capacity(params.len());
+        for t in &params {
+            ps.push(t.to_cpu_shrew()?);
+        }
         Ok(PySGD {
             inner: shrew_optim::SGD::new(ps, lr, momentum, weight_decay),
         })
@@ -1887,8 +2000,18 @@ impl PySGD {
 
     fn step(&mut self, grads: &PyGradStore) -> PyResult<()> {
         use shrew_optim::Optimizer;
-        self.inner.step(&grads.inner).map_err(to_py_err)?;
-        Ok(())
+        match &grads.inner {
+            GradStoreInner::Cpu(store) => {
+                self.inner.step(store).map_err(to_py_err)?;
+                Ok(())
+            }
+            #[cfg(feature = "cuda")]
+            GradStoreInner::Cuda(_) => {
+                Err(PyRuntimeError::new_err(
+                    "Optimizer was initialized with CPU parameters; gradients must be on CPU",
+                ))
+            }
+        }
     }
 }
 
@@ -1911,7 +2034,10 @@ impl PyAdam {
         eps: f64,
         weight_decay: f64,
     ) -> PyResult<Self> {
-        let ps: Vec<ShrewTensor> = params.iter().map(|t| t.inner.clone()).collect();
+        let mut ps = Vec::with_capacity(params.len());
+        for t in &params {
+            ps.push(t.to_cpu_shrew()?);
+        }
         let opt = shrew_optim::Adam::new(ps, lr)
             .beta1(beta1)
             .beta2(beta2)
@@ -1922,8 +2048,18 @@ impl PyAdam {
 
     fn step(&mut self, grads: &PyGradStore) -> PyResult<()> {
         use shrew_optim::Optimizer;
-        self.inner.step(&grads.inner).map_err(to_py_err)?;
-        Ok(())
+        match &grads.inner {
+            GradStoreInner::Cpu(store) => {
+                self.inner.step(store).map_err(to_py_err)?;
+                Ok(())
+            }
+            #[cfg(feature = "cuda")]
+            GradStoreInner::Cuda(_) => {
+                Err(PyRuntimeError::new_err(
+                    "Optimizer was initialized with CPU parameters; gradients must be on CPU",
+                ))
+            }
+        }
     }
 }
 
@@ -1945,7 +2081,10 @@ impl PyAdamW {
         beta1: f64,
         beta2: f64,
     ) -> PyResult<Self> {
-        let ps: Vec<ShrewTensor> = params.iter().map(|t| t.inner.clone()).collect();
+        let mut ps = Vec::with_capacity(params.len());
+        for t in &params {
+            ps.push(t.to_cpu_shrew()?);
+        }
         let opt = shrew_optim::AdamW::new(ps, lr, weight_decay)
             .beta1(beta1)
             .beta2(beta2);
@@ -1954,8 +2093,18 @@ impl PyAdamW {
 
     fn step(&mut self, grads: &PyGradStore) -> PyResult<()> {
         use shrew_optim::Optimizer;
-        self.inner.step(&grads.inner).map_err(to_py_err)?;
-        Ok(())
+        match &grads.inner {
+            GradStoreInner::Cpu(store) => {
+                self.inner.step(store).map_err(to_py_err)?;
+                Ok(())
+            }
+            #[cfg(feature = "cuda")]
+            GradStoreInner::Cuda(_) => {
+                Err(PyRuntimeError::new_err(
+                    "Optimizer was initialized with CPU parameters; gradients must be on CPU",
+                ))
+            }
+        }
     }
 }
 
@@ -1978,7 +2127,10 @@ impl PyRMSProp {
         momentum: f64,
         weight_decay: f64,
     ) -> PyResult<Self> {
-        let ps: Vec<ShrewTensor> = params.iter().map(|t| t.inner.clone()).collect();
+        let mut ps = Vec::with_capacity(params.len());
+        for t in &params {
+            ps.push(t.to_cpu_shrew()?);
+        }
         let opt = shrew_optim::RMSProp::new(ps, lr)
             .alpha(alpha)
             .epsilon(eps)
@@ -1989,8 +2141,18 @@ impl PyRMSProp {
 
     fn step(&mut self, grads: &PyGradStore) -> PyResult<()> {
         use shrew_optim::Optimizer;
-        self.inner.step(&grads.inner).map_err(to_py_err)?;
-        Ok(())
+        match &grads.inner {
+            GradStoreInner::Cpu(store) => {
+                self.inner.step(store).map_err(to_py_err)?;
+                Ok(())
+            }
+            #[cfg(feature = "cuda")]
+            GradStoreInner::Cuda(_) => {
+                Err(PyRuntimeError::new_err(
+                    "Optimizer was initialized with CPU parameters; gradients must be on CPU",
+                ))
+            }
+        }
     }
 }
 
@@ -2013,7 +2175,10 @@ impl PyRAdam {
         eps: f64,
         weight_decay: f64,
     ) -> PyResult<Self> {
-        let ps: Vec<ShrewTensor> = params.iter().map(|t| t.inner.clone()).collect();
+        let mut ps = Vec::with_capacity(params.len());
+        for t in &params {
+            ps.push(t.to_cpu_shrew()?);
+        }
         let opt = shrew_optim::RAdam::new(ps, lr)
             .beta1(beta1)
             .beta2(beta2)
@@ -2024,8 +2189,18 @@ impl PyRAdam {
 
     fn step(&mut self, grads: &PyGradStore) -> PyResult<()> {
         use shrew_optim::Optimizer;
-        self.inner.step(&grads.inner).map_err(to_py_err)?;
-        Ok(())
+        match &grads.inner {
+            GradStoreInner::Cpu(store) => {
+                self.inner.step(store).map_err(to_py_err)?;
+                Ok(())
+            }
+            #[cfg(feature = "cuda")]
+            GradStoreInner::Cuda(_) => {
+                Err(PyRuntimeError::new_err(
+                    "Optimizer was initialized with CPU parameters; gradients must be on CPU",
+                ))
+            }
+        }
     }
 }
 
@@ -2157,57 +2332,62 @@ impl PyReduceLROnPlateau {
 
 // Loss Functions (module-level)
 
+macro_rules! dispatch_loss {
+    ($a:expr, $b:expr, $func:ident $(, $arg:expr)*) => {
+        match (&$a.inner, &$b.inner) {
+            (DeviceTensor::Cpu(a), DeviceTensor::Cpu(b)) => {
+                let out = shrew_nn::loss::$func::<CpuBackend>(a, b $(, $arg)*).map_err(to_py_err)?;
+                Ok(PyTensor { inner: DeviceTensor::Cpu(out) })
+            }
+            #[cfg(feature = "cuda")]
+            (DeviceTensor::Cuda(a), DeviceTensor::Cuda(b)) => {
+                let out = shrew_nn::loss::$func::<shrew_cuda::CudaBackend>(a, b $(, $arg)*).map_err(to_py_err)?;
+                Ok(PyTensor { inner: DeviceTensor::Cuda(out) })
+            }
+            #[cfg(feature = "cuda")]
+            _ => {
+                let a_cpu = $a.inner.to_cpu().map_err(to_py_err)?;
+                let b_cpu = $b.inner.to_cpu().map_err(to_py_err)?;
+                let out = shrew_nn::loss::$func::<CpuBackend>(&a_cpu, &b_cpu $(, $arg)*).map_err(to_py_err)?;
+                Ok(PyTensor { inner: DeviceTensor::Cpu(out) })
+            }
+        }
+    };
+}
+
 #[pyfunction]
 fn mse_loss(pred: &PyTensor, target: &PyTensor) -> PyResult<PyTensor> {
-    Ok(PyTensor {
-        inner: shrew_nn::loss::mse_loss::<B>(&pred.inner, &target.inner).map_err(to_py_err)?,
-    })
+    dispatch_loss!(pred, target, mse_loss)
 }
 
 #[pyfunction]
 fn cross_entropy_loss(logits: &PyTensor, target: &PyTensor) -> PyResult<PyTensor> {
-    Ok(PyTensor {
-        inner: shrew_nn::loss::cross_entropy_loss::<B>(&logits.inner, &target.inner)
-            .map_err(to_py_err)?,
-    })
+    dispatch_loss!(logits, target, cross_entropy_loss)
 }
 
 #[pyfunction]
 fn l1_loss(pred: &PyTensor, target: &PyTensor) -> PyResult<PyTensor> {
-    Ok(PyTensor {
-        inner: shrew_nn::loss::l1_loss::<B>(&pred.inner, &target.inner).map_err(to_py_err)?,
-    })
+    dispatch_loss!(pred, target, l1_loss)
 }
 
 #[pyfunction]
 fn smooth_l1_loss(pred: &PyTensor, target: &PyTensor, beta: f64) -> PyResult<PyTensor> {
-    Ok(PyTensor {
-        inner: shrew_nn::loss::smooth_l1_loss::<B>(&pred.inner, &target.inner, beta)
-            .map_err(to_py_err)?,
-    })
+    dispatch_loss!(pred, target, smooth_l1_loss, beta)
 }
 
 #[pyfunction]
 fn bce_loss(pred: &PyTensor, target: &PyTensor) -> PyResult<PyTensor> {
-    Ok(PyTensor {
-        inner: shrew_nn::loss::bce_loss::<B>(&pred.inner, &target.inner).map_err(to_py_err)?,
-    })
+    dispatch_loss!(pred, target, bce_loss)
 }
 
 #[pyfunction]
 fn bce_with_logits_loss(logits: &PyTensor, target: &PyTensor) -> PyResult<PyTensor> {
-    Ok(PyTensor {
-        inner: shrew_nn::loss::bce_with_logits_loss::<B>(&logits.inner, &target.inner)
-            .map_err(to_py_err)?,
-    })
+    dispatch_loss!(logits, target, bce_with_logits_loss)
 }
 
 #[pyfunction]
 fn nll_loss(log_probs: &PyTensor, targets: &PyTensor) -> PyResult<PyTensor> {
-    Ok(PyTensor {
-        inner: shrew_nn::loss::nll_loss::<B>(&log_probs.inner, &targets.inner)
-            .map_err(to_py_err)?,
-    })
+    dispatch_loss!(log_probs, targets, nll_loss)
 }
 
 // Gradient Utilities (module-level)
@@ -2219,10 +2399,29 @@ fn clip_grad_norm(
     params: Vec<PyRef<PyTensor>>,
     max_norm: f64,
 ) -> PyResult<(PyGradStore, f64)> {
-    let ps: Vec<ShrewTensor> = params.iter().map(|t| t.inner.clone()).collect();
-    let (new_grads, total) =
-        shrew_optim::clip_grad_norm::<B>(&grads.inner, &ps, max_norm).map_err(to_py_err)?;
-    Ok((PyGradStore { inner: new_grads }, total))
+    match &grads.inner {
+        GradStoreInner::Cpu(store) => {
+            let mut ps = Vec::with_capacity(params.len());
+            for t in &params {
+                ps.push(t.to_cpu_shrew()?);
+            }
+            let (new_grads, total) =
+                shrew_optim::clip_grad_norm::<B>(store, &ps, max_norm).map_err(to_py_err)?;
+            Ok((PyGradStore { inner: GradStoreInner::Cpu(new_grads) }, total))
+        }
+        #[cfg(feature = "cuda")]
+        GradStoreInner::Cuda(store) => {
+            let mut ps = Vec::with_capacity(params.len());
+            for t in &params {
+                if let DeviceTensor::Cuda(c) = &t.inner {
+                    ps.push(c.clone());
+                }
+            }
+            let (new_grads, total) =
+                shrew_optim::clip_grad_norm::<shrew_cuda::CudaBackend>(store, &ps, max_norm).map_err(to_py_err)?;
+            Ok((PyGradStore { inner: GradStoreInner::Cuda(new_grads) }, total))
+        }
+    }
 }
 
 /// Clip gradients by value.
@@ -2232,17 +2431,53 @@ fn clip_grad_value(
     params: Vec<PyRef<PyTensor>>,
     max_value: f64,
 ) -> PyResult<PyGradStore> {
-    let ps: Vec<ShrewTensor> = params.iter().map(|t| t.inner.clone()).collect();
-    let new_grads =
-        shrew_optim::clip_grad_value::<B>(&grads.inner, &ps, max_value).map_err(to_py_err)?;
-    Ok(PyGradStore { inner: new_grads })
+    match &grads.inner {
+        GradStoreInner::Cpu(store) => {
+            let mut ps = Vec::with_capacity(params.len());
+            for t in &params {
+                ps.push(t.to_cpu_shrew()?);
+            }
+            let new_grads =
+                shrew_optim::clip_grad_value::<B>(store, &ps, max_value).map_err(to_py_err)?;
+            Ok(PyGradStore { inner: GradStoreInner::Cpu(new_grads) })
+        }
+        #[cfg(feature = "cuda")]
+        GradStoreInner::Cuda(store) => {
+            let mut ps = Vec::with_capacity(params.len());
+            for t in &params {
+                if let DeviceTensor::Cuda(c) = &t.inner {
+                    ps.push(c.clone());
+                }
+            }
+            let new_grads =
+                shrew_optim::clip_grad_value::<shrew_cuda::CudaBackend>(store, &ps, max_value).map_err(to_py_err)?;
+            Ok(PyGradStore { inner: GradStoreInner::Cuda(new_grads) })
+        }
+    }
 }
 
 /// Compute the global gradient norm.
 #[pyfunction]
 fn grad_norm(grads: &PyGradStore, params: Vec<PyRef<PyTensor>>) -> PyResult<f64> {
-    let ps: Vec<ShrewTensor> = params.iter().map(|t| t.inner.clone()).collect();
-    shrew_optim::grad_norm::<B>(&grads.inner, &ps).map_err(to_py_err)
+    match &grads.inner {
+        GradStoreInner::Cpu(store) => {
+            let mut ps = Vec::with_capacity(params.len());
+            for t in &params {
+                ps.push(t.to_cpu_shrew()?);
+            }
+            shrew_optim::grad_norm::<B>(store, &ps).map_err(to_py_err)
+        }
+        #[cfg(feature = "cuda")]
+        GradStoreInner::Cuda(store) => {
+            let mut ps = Vec::with_capacity(params.len());
+            for t in &params {
+                if let DeviceTensor::Cuda(c) = &t.inner {
+                    ps.push(c.clone());
+                }
+            }
+            shrew_optim::grad_norm::<shrew_cuda::CudaBackend>(store, &ps).map_err(to_py_err)
+        }
+    }
 }
 
 // Data Loading
@@ -2354,10 +2589,11 @@ fn save_safetensors(path: &str, names: Vec<String>, tensors: Vec<PyRef<PyTensor>
             "names and tensors must have same length",
         ));
     }
-    let pairs: Vec<(String, ShrewTensor)> = names
-        .into_iter()
-        .zip(tensors.iter().map(|t| t.inner.clone()))
-        .collect();
+    let mut pairs = Vec::with_capacity(names.len());
+    for (name, tensor) in names.into_iter().zip(tensors.iter()) {
+        let cpu_t = tensor.to_cpu_shrew()?;
+        pairs.push((name, cpu_t));
+    }
     shrew::safetensors::save::<B>(path, &pairs).map_err(to_py_err)
 }
 
@@ -2366,7 +2602,7 @@ fn load_safetensors(path: &str) -> PyResult<Vec<(String, PyTensor)>> {
     let loaded = shrew::safetensors::load::<B>(path, &CpuDevice).map_err(to_py_err)?;
     Ok(loaded
         .into_iter()
-        .map(|(name, t)| (name, PyTensor { inner: t }))
+        .map(|(name, t)| (name, PyTensor::from(t)))
         .collect())
 }
 
@@ -2507,14 +2743,17 @@ fn py_perplexity(cross_entropy_loss: f64) -> f64 {
 #[pyfunction]
 #[pyo3(name = "tensor_accuracy")]
 fn py_tensor_accuracy(logits: &PyTensor, targets: &PyTensor) -> PyResult<f64> {
-    shrew_nn::metrics::tensor_accuracy::<B>(&logits.inner, &targets.inner).map_err(to_py_err)
+    let l = logits.to_cpu_shrew()?;
+    let t = targets.to_cpu_shrew()?;
+    shrew_nn::metrics::tensor_accuracy::<B>(&l, &t).map_err(to_py_err)
 }
 
 /// Argmax classes from logits tensor [batch, classes] -> Vec<usize>.
 #[pyfunction]
 #[pyo3(name = "argmax_classes")]
 fn py_argmax_classes(logits: &PyTensor) -> PyResult<Vec<usize>> {
-    shrew_nn::metrics::argmax_classes::<B>(&logits.inner).map_err(to_py_err)
+    let l = logits.to_cpu_shrew()?;
+    shrew_nn::metrics::argmax_classes::<B>(&l).map_err(to_py_err)
 }
 
 fn parse_average(s: &str) -> PyResult<shrew_nn::metrics::Average> {
