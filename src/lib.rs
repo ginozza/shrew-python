@@ -1043,6 +1043,15 @@ impl PyExecutor {
         }
     }
 
+    /// Train this executor using its @training block and embedded dataset.
+    fn train(&mut self) -> PyResult<std::collections::HashMap<String, f64>> {
+        let result = self.inner.train().map_err(to_py_err)?;
+        let mut map = std::collections::HashMap::new();
+        map.insert("epochs".to_string(), result.epochs.len() as f64);
+        map.insert("final_loss".to_string(), result.final_loss);
+        Ok(map)
+    }
+
     /// Get the list of input names for a graph.
     fn input_names(&self, graph_name: &str) -> PyResult<Vec<String>> {
         let graph =
@@ -2800,10 +2809,26 @@ fn cuda_device_count() -> usize {
     }
 }
 
+/// Train a .sw model file directly using its embedded dataset and training configuration.
+#[pyfunction(name = "train")]
+#[pyo3(signature = (path, dtype="f64"))]
+fn py_train(path: &str, dtype: &str) -> PyResult<std::collections::HashMap<String, f64>> {
+    let dt = parse_dtype(dtype)?;
+    let config = shrew::exec::RuntimeConfig::default().with_dtype(dt);
+    let (_trainer, result) = shrew::exec::train_file::<B>(path, CpuDevice, config)
+        .map_err(|e| PyRuntimeError::new_err(format!("{e}")))?;
+    let mut map = std::collections::HashMap::new();
+    map.insert("epochs".to_string(), result.epochs.len() as f64);
+    map.insert("final_loss".to_string(), result.final_loss);
+    Ok(map)
+}
+
 // Module Registration
 
 #[pymodule]
 fn shrew_python(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(py_train, m)?)?;
+
     // Core
     m.add_class::<PyTensor>()?;
     m.add_class::<PyGradStore>()?;
